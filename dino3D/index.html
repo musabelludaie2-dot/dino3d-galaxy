@@ -1,0 +1,460 @@
+
+<html lang="en">
+ 
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dino3D Studio</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #10121b;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+header {
+  height: 65px;
+  background: #191c29;
+  display: flex;
+  align-items: center;
+  padding: 0 22px;
+  justify-content: space-between;
+  border-bottom: 1px solid #303448;
+}
+
+.logo {
+  font-size: 23px;
+  font-weight: bold;
+  color: #72e6bd;
+}
+
+button {
+  background: #252b3d;
+  border: 1px solid #414a61;
+  color: white;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #38435c;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 190px 1fr 210px;
+  height: calc(100vh - 65px);
+}
+
+aside {
+  background: #191c29;
+  padding: 15px;
+  border-right: 1px solid #303448;
+}
+
+h3 {
+  color: #72e6bd;
+  font-size: 14px;
+}
+
+.tool {
+  display: block;
+  width: 100%;
+  margin: 9px 0;
+  text-align: left;
+}
+
+#workspace {
+  position: relative;
+  overflow: hidden;
+  background: #101522;
+}
+
+#scene {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hint {
+  position: absolute;
+  bottom: 15px;
+  left: 15px;
+  color: #aab3c7;
+  font-size: 12px;
+}
+
+@media(max-width:700px) {
+  .app {
+    grid-template-columns: 115px 1fr;
+  }
+  .app aside:last-child {
+    display: none;
+  }
+}
+</style>
+</head>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+  }
+}
+</script>
+<body>
+
+<header>
+  <div class="logo">🦖 Dino3D Studio</div>
+  <button onclick="alert('Save feature coming soon!')">
+    Save Project
+  </button>
+</header>
+
+<div class="app">
+
+<aside>
+  <h3>CREATE OBJECTS</h3>
+  <button class="tool" onclick="addShape('box')">🧊 Cube</button>
+  <button class="tool" onclick="addShape('sphere')">⚪ Sphere</button>
+  <button class="tool" onclick="addShape('cylinder')">🥫 Cylinder</button>
+  <button class="tool" onclick="addShape('cone')">🔺 Cone</button>
+</aside>
+
+<main id="workspace">
+  <canvas id="scene"></canvas>
+  <div class="hint">Drag to rotate • Scroll to zoom</div>
+</main>
+
+<aside>
+  <h3>DESIGN TOOLS</h3>
+  <p>Choose an object to add it to your world.</p>
+  <h3>YOUR WORKSPACE</h3>
+  <p id="count">Objects: 0</p>
+  <button class="tool" onclick="clearScene()">🗑 Clear World</button>
+</aside>
+
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/TransformControls.js';
+const undoStack = [];
+const redoStack = [];
+function saveHistory() {
+  undoStack.push(
+    scene.children
+      .filter(obj => obj.isMesh)
+      .map(obj => ({
+        type: obj.name,
+        geometry: obj.geometry.clone(),
+        material: obj.material.clone(),
+        position: obj.position.clone(),
+        rotation: obj.rotation.clone(),
+        scale: obj.scale.clone()
+      }))
+  );
+
+  redoStack.length = 0;
+}
+
+const canvas = document.getElementById('scene');
+const workspace = document.getElementById('workspace');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#101522');
+
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+camera.position.set(5, 5, 7);
+
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true
+});
+
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+
+const light = new THREE.DirectionalLight(0xffffff, 2);
+light.position.set(5, 8, 5);
+scene.add(light);
+
+scene.add(new THREE.GridHelper(30, 30, 0x52627c, 0x29344a));
+
+const objects = [];
+let selected = null;
+
+const transform = new TransformControls(camera, renderer.domElement);
+scene.add(transform.getHelper());
+
+transform.addEventListener('dragging-changed', event => {
+  if (event.value) {
+    saveHistory();
+  }
+
+  controls.enabled = !event.value;
+});
+
+transform.addEventListener('objectChange', updateInfo);
+
+function updateCount() {
+  document.getElementById('count').textContent =
+    'Objects: ' + objects.length;
+}
+
+function updateInfo() {
+  const info = document.getElementById('objectInfo');
+  if (!selected) {
+    info.textContent = 'No object selected';
+    return;
+  }
+
+  info.textContent = 'Selected: ' + selected.name;
+}
+
+function selectObject(object) {
+  selected = object;
+  transform.attach(object);
+  updateInfo();
+}
+
+function addShape(type) {
+  let geometry;
+
+  if (type === 'box') geometry = new THREE.BoxGeometry();
+  if (type === 'sphere') geometry = new THREE.SphereGeometry(0.7, 32, 32);
+  if (type === 'cylinder') geometry = new THREE.CylinderGeometry(0.6, 0.6, 1.2, 32);
+  if (type === 'cone') geometry = new THREE.ConeGeometry(0.7, 1.4, 32);
+
+  if (!geometry) return;
+
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(Math.random(), 0.7, 0.55),
+    roughness: 0.5
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(
+    (Math.random() - 0.5) * 3,
+    0.7,
+    (Math.random() - 0.5) * 3
+  );
+
+  mesh.name = type.charAt(0).toUpperCase() + type.slice(1);
+
+  saveHistory(); // Save before adding the new object
+
+  scene.add(mesh);
+  objects.push(mesh);
+  selectObject(mesh);
+  updateCount();
+}
+
+window.addShape = addShape;
+function restoreScene(snapshot) {
+  transform.detach();
+  selected = null;
+
+  scene.children
+    .filter(obj => obj.isMesh)
+    .forEach(obj => scene.remove(obj));
+
+  objects.length = 0;
+
+  snapshot.forEach(item => {
+    const mesh = new THREE.Mesh(
+      item.geometry.clone(),
+      item.material.clone()
+    );
+
+    mesh.position.copy(item.position);
+    mesh.rotation.copy(item.rotation);
+    mesh.scale.copy(item.scale);
+
+    scene.add(mesh);
+    objects.push(mesh);
+  });
+
+  updateCount();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+
+  redoStack.push(
+    scene.children
+      .filter(obj => obj.isMesh)
+      .map(obj => ({
+        geometry: obj.geometry.clone(),
+        material: obj.material.clone(),
+        position: obj.position.clone(),
+        rotation: obj.rotation.clone(),
+        scale: obj.scale.clone()
+      }))
+  );
+
+  restoreScene(undoStack.pop());
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+
+  undoStack.push(
+    scene.children
+      .filter(obj => obj.isMesh)
+      .map(obj => ({
+        geometry: obj.geometry.clone(),
+        material: obj.material.clone(),
+        position: obj.position.clone(),
+        rotation: obj.rotation.clone(),
+        scale: obj.scale.clone()
+      }))
+  );
+
+  restoreScene(redoStack.pop());
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    undo();
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === 'y') {
+    event.preventDefault();
+    redo();
+  }
+}); 
+window.clearScene = function() {
+  transform.detach();
+  selected = null;
+
+  objects.forEach(object => {
+    scene.remove(object);
+    object.geometry.dispose();
+    object.material.dispose();
+  });
+
+  objects.length = 0;
+  updateCount();
+  updateInfo();
+};
+
+function createButton(label, callback) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.style.cssText =
+    'display:block;width:100%;margin:8px 0;padding:10px;background:#252b3d;color:white;border:1px solid #414a61;border-radius:8px;cursor:pointer;';
+  button.addEventListener('click', callback);
+  return button;
+}
+
+const panel = document.querySelectorAll('.app aside')[1];
+
+const title = document.createElement('h3');
+title.textContent = 'OBJECT EDITOR';
+panel.appendChild(title);
+
+const info = document.createElement('p');
+info.id = 'objectInfo';
+info.textContent = 'No object selected';
+panel.appendChild(info);
+
+panel.appendChild(createButton('↔ Move', () => {
+  if (selected) transform.setMode('translate');
+}));
+
+panel.appendChild(createButton('🔄 Rotate', () => {
+  if (selected) transform.setMode('rotate');
+}));
+
+panel.appendChild(createButton('📏 Resize', () => {
+  if (selected) transform.setMode('scale');
+}));
+
+const colorLabel = document.createElement('p');
+colorLabel.textContent = 'Object color';
+panel.appendChild(colorLabel);
+
+const colorPicker = document.createElement('input');
+colorPicker.type = 'color';
+colorPicker.value = '#72e6bd';
+colorPicker.style.cssText = 'width:100%;height:40px;cursor:pointer;';
+panel.appendChild(colorPicker);
+
+colorPicker.addEventListener('input', () => {
+  if (selected) selected.material.color.set(colorPicker.value);
+});
+
+panel.appendChild(createButton('🗑 Delete Selected', () => {
+  if (!selected) return;
+
+  scene.remove(selected);
+  objects.splice(objects.indexOf(selected), 1);
+
+  selected.geometry.dispose();
+  selected.material.dispose();
+
+  selected = null;
+  transform.detach();
+
+  updateCount();
+  updateInfo();
+}));
+
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+canvas.addEventListener('pointerdown', event => {
+  if (transform.dragging) return;
+
+  const rect = canvas.getBoundingClientRect();
+
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+
+  const hits = raycaster.intersectObjects(objects);
+
+  if (hits.length > 0) {
+    selectObject(hits[0].object);
+  }
+});
+
+function resize() {
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+
+  if (!width || !height) return;
+
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height, false);
+}
+
+new ResizeObserver(resize).observe(canvas);
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+</script>
+
+</body>
+</html>
